@@ -3,7 +3,7 @@ import json
 import os
 
 # 测试API端点
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://localhost:8000"
 
 def test_health():
     """测试健康检查端点"""
@@ -104,14 +104,14 @@ def main():
     
     # 测试4: hogel生成（模拟）
     print("\n注意: hogel生成测试需要上传真实图像文件")
-    print("您可以通过前端界面 http://localhost:5000 进行完整测试")
+    print("您可以通过前端界面 http://localhost:8000 进行完整测试")
     
     print(f"\n测试结果: 通过 {tests_passed}/3, 失败 {tests_failed}/3")
     
     if tests_failed == 0:
         print("所有基本API测试通过！")
         print("\n下一步:")
-        print("1. 访问 http://localhost:5000 使用前端界面")
+        print("1. 访问 http://localhost:8000 使用前端界面")
         print("2. 上传图像文件（支持拖放）")
         print("3. 配置hogel参数")
         print("4. 点击'生成Hogel'按钮")

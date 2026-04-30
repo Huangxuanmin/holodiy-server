@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 from PIL import Image
 import io
 import base64
+import hogel_processing
 
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
@@ -18,6 +19,7 @@ UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'bmp'}
 MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB
+APP_PORT = 8000
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
@@ -96,7 +98,7 @@ def upload_files():
 
 @app.route('/api/generate-hogel', methods=['POST'])
 def generate_hogel():
-    """生成hogel图像接口"""
+    """生成hogel图像接口（水平视差）"""
     try:
         # 检查文件上传
         if 'files' not in request.files:
@@ -127,16 +129,10 @@ def generate_hogel():
                 if not saved_files:
                     return jsonify({'success': False, 'error': '没有有效的图像文件'}), 400
                 
-                # 直接调用 hogel_processor.py 的函数
+                # 使用新的处理模块
                 try:
-                    # 导入 hogel_processor 模块
-                    import importlib.util
-                    spec = importlib.util.spec_from_file_location("hogel_processor", "hogel_processor.py")
-                    hogel_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(hogel_module)
-                    
-                    # 调用处理函数
-                    hogel_module.process_hogel_images(
+                    processor = hogel_processing.create_processor('horizontal')
+                    processor.process(
                         input_folder=temp_input_dir,
                         output_folder=temp_output_dir,
                         C=C,
@@ -145,7 +141,7 @@ def generate_hogel():
                         quality=quality
                     )
                     
-                    process_log = "处理成功完成"
+                    process_log = "水平视差处理成功完成"
                     
                 except Exception as e:
                     return jsonify({
@@ -168,7 +164,7 @@ def generate_hogel():
                     file_size = os.path.getsize(hogel_path)
                     
                     # 创建唯一的输出文件名
-                    output_filename = f"hogel_{len(hogels) + 1:03d}.jpg"
+                    output_filename = f"hogel_horizontal_{len(hogels) + 1:03d}.jpg"
                     output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
                     
                     # 复制到永久输出目录
@@ -183,13 +179,115 @@ def generate_hogel():
                 
                 return jsonify({
                     'success': True,
-                    'message': f'成功生成 {len(hogels)} 个 hogel 图像',
+                    'message': f'成功生成 {len(hogels)} 个水平视差hogel图像',
                     'hogels': hogels,
                     'log': process_log
                 })
     
     except Exception as e:
         print(f"生成hogel时出错: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'服务器内部错误: {str(e)}'
+        }), 500
+
+@app.route('/api/generate-full-parallax-hogel', methods=['POST'])
+def generate_full_parallax_hogel():
+    """生成全视差hogel图像接口"""
+    try:
+        # 检查文件上传
+        if 'files' not in request.files:
+            return jsonify({'success': False, 'error': '没有文件上传'}), 400
+        
+        files = request.files.getlist('files')
+        if not files:
+            return jsonify({'success': False, 'error': '没有选择文件'}), 400
+        
+        # 获取参数
+        canvas_width = request.form.get('canvas_width', type=float, default=100.0)
+        canvas_height = request.form.get('canvas_height', type=float, default=100.0)
+        exposure_width = request.form.get('exposure_width', type=float, default=10.0)
+        quality = request.form.get('quality', type=int, default=95)
+        
+        # 参数验证
+        if canvas_width <= 0 or canvas_height <= 0 or exposure_width <= 0:
+            return jsonify({'success': False, 'error': '画幅尺寸和曝光宽度必须大于0'}), 400
+        
+        if exposure_width > canvas_width:
+            return jsonify({'success': False, 'error': '曝光宽度不能大于画幅宽度'}), 400
+        
+        # 创建临时目录
+        with tempfile.TemporaryDirectory() as temp_input_dir:
+            with tempfile.TemporaryDirectory() as temp_output_dir:
+                # 保存上传的文件到临时目录
+                for file in files:
+                    if file and allowed_file(file.filename):
+                        filename = secure_filename(file.filename)
+                        file_path = os.path.join(temp_input_dir, filename)
+                        file.save(file_path)
+                
+                # 检查是否有文件保存成功
+                saved_files = [f for f in os.listdir(temp_input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
+                if not saved_files:
+                    return jsonify({'success': False, 'error': '没有有效的图像文件'}), 400
+                
+                # 使用新的处理模块
+                try:
+                    processor = hogel_processing.create_processor('full')
+                    processor.process(
+                        input_folder=temp_input_dir,
+                        output_folder=temp_output_dir,
+                        canvas_width=canvas_width,
+                        canvas_height=canvas_height,
+                        exposure_width=exposure_width,
+                        quality=quality
+                    )
+                    
+                    process_log = "全视差处理成功完成"
+                    
+                except Exception as e:
+                    return jsonify({
+                        'success': False,
+                        'error': f'处理失败: {str(e)}'
+                    }), 500
+                
+                # 获取生成的hogel文件
+                hogel_files = [f for f in os.listdir(temp_output_dir) if f.lower().endswith('.jpg')]
+                hogel_files.sort()
+                
+                hogels = []
+                for hogel_file in hogel_files:
+                    hogel_path = os.path.join(temp_output_dir, hogel_file)
+                    
+                    # 生成预览图
+                    preview_url = get_image_preview(hogel_path)
+                    
+                    # 获取文件信息
+                    file_size = os.path.getsize(hogel_path)
+                    
+                    # 创建唯一的输出文件名
+                    output_filename = f"hogel_full_{len(hogels) + 1:03d}.jpg"
+                    output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+                    
+                    # 复制到永久输出目录
+                    shutil.copy2(hogel_path, output_path)
+                    
+                    hogels.append({
+                        'name': output_filename,
+                        'size': f"{file_size / 1024:.1f} KB",
+                        'preview_url': preview_url,
+                        'download_url': f'/api/download/{output_filename}'
+                    })
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'成功生成 {len(hogels)} 个全视差hogel图像',
+                    'hogels': hogels,
+                    'log': process_log
+                })
+    
+    except Exception as e:
+        print(f"生成全视差hogel时出错: {e}")
         return jsonify({
             'success': False,
             'error': f'服务器内部错误: {str(e)}'
@@ -255,13 +353,21 @@ def get_default_settings():
     return jsonify({
         'success': True,
         'settings': {
-            'hogelCount': 10,
-            'hogelWidth': 500,
-            'heightMode': 'fixed',
-            'hogelHeight': 500,
-            'quality': 95,
-            'enableAntiAliasing': True,
-            'enableOptimization': True
+            'horizontal': {
+                'hogelCount': 10,
+                'hogelWidth': 500,
+                'heightMode': 'fixed',
+                'hogelHeight': 500,
+                'quality': 95,
+                'enableAntiAliasing': True,
+                'enableOptimization': True
+            },
+            'full': {
+                'canvasWidth': 100.0,
+                'canvasHeight': 100.0,
+                'exposureWidth': 10.0,
+                'quality': 95
+            }
         }
     })
 
@@ -292,22 +398,17 @@ def estimate_processing():
 @app.route('/')
 def serve_frontend():
     """提供前端页面"""
-    return send_from_directory('.', 'vue_hogel.html')
+    return send_from_directory('.', 'index.html')
 
-@app.route('/vue_hogel.css')
-def serve_css():
-    """提供CSS文件"""
-    return send_from_directory('.', 'vue_hogel.css')
-
-@app.route('/vue_hogel.js')
-def serve_js():
-    """提供JavaScript文件"""
-    return send_from_directory('.', 'vue_hogel.js')
+@app.route('/<path:filename>')
+def serve_static(filename):
+    """提供静态文件"""
+    return send_from_directory('.', filename)
 
 if __name__ == '__main__':
     print("启动 Hogel 图像生成器 API 服务...")
     print(f"上传目录: {UPLOAD_FOLDER}")
     print(f"输出目录: {OUTPUT_FOLDER}")
-    print("访问 http://localhost:5000 使用前端界面")
+    print(f"访问 http://localhost:{APP_PORT} 使用前端界面")
     
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    app.run(debug=True, host='0.0.0.0', port=APP_PORT)

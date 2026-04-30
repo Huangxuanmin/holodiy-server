@@ -1,0 +1,24 @@
+# Frontend dependencies and build output
+node_modules/
+dist/
+build/
+.vite/
+
+# Python virtual environments and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local runtime data
+uploads/
+outputs/
+*.log
+
+# Local environment files
+.env
+.env.*
+
+# OS files
+.DS_Store
