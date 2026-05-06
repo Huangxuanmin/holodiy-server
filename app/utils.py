@@ -2,6 +2,7 @@
 import base64
 import io
 import os
+import re
 
 from PIL import Image
 from werkzeug.utils import secure_filename
@@ -56,6 +57,85 @@ def safe_task_subdir(base_dir: str, task_id: str):
     """返回 (safe_task_id, 对应的子目录绝对路径)。"""
     safe_task_id = secure_filename(task_id)
     return safe_task_id, os.path.join(base_dir, safe_task_id)
+
+
+_FULL_HOGEL_PATTERN = re.compile(r"hogel_(\d+)_(\d+)\.jpg$", re.IGNORECASE)
+
+
+def build_composite_image(
+    source_dir: str,
+    destination_dir: str,
+    mode: str,
+    output_name: str = "composite.jpg",
+    quality: int = 95,
+    max_canvas_size: int = 8000,
+):
+    """将 source_dir 下的 hogel 按规则阵列排列成一张大图保存到 destination_dir。
+
+    mode="horizontal": 按文件名排序，1 行 × N 列 水平拼接。
+    mode="full": 解析文件名 hogel_{row}_{col}.jpg, 按 row/col 拼接成二维阵列。
+
+    返回字典 {path, name, width, height, cols, rows, tile_width, tile_height}
+    超过 max_canvas_size 会等比缩放保存，避免过大内存/文件。
+    """
+    files = sorted(
+        f for f in os.listdir(source_dir) if f.lower().endswith(".jpg")
+    )
+    if not files:
+        return None
+
+    first_path = os.path.join(source_dir, files[0])
+    with Image.open(first_path) as first:
+        tile_w, tile_h = first.size
+        img_mode = first.mode if first.mode in ("RGB", "RGBA", "L") else "RGB"
+
+    if mode == "full":
+        positions = []
+        for filename in files:
+            match = _FULL_HOGEL_PATTERN.search(filename)
+            if match:
+                positions.append((int(match.group(1)), int(match.group(2)), filename))
+        if not positions:
+            return None
+        rows = max(r for r, _, _ in positions) + 1
+        cols = max(c for _, c, _ in positions) + 1
+    else:
+        positions = [(0, idx, filename) for idx, filename in enumerate(files)]
+        rows = 1
+        cols = len(files)
+
+    canvas_w = cols * tile_w
+    canvas_h = rows * tile_h
+
+    canvas = Image.new(img_mode, (canvas_w, canvas_h))
+    for row, col, filename in positions:
+        with Image.open(os.path.join(source_dir, filename)) as tile_img:
+            if tile_img.mode != img_mode:
+                tile_img = tile_img.convert(img_mode)
+            canvas.paste(tile_img, (col * tile_w, row * tile_h))
+
+    # 避免阵列过大，按最长边缩放
+    scale = 1.0
+    longest = max(canvas_w, canvas_h)
+    if longest > max_canvas_size:
+        scale = max_canvas_size / longest
+        new_size = (max(1, int(canvas_w * scale)), max(1, int(canvas_h * scale)))
+        canvas = canvas.resize(new_size, Image.Resampling.LANCZOS)
+
+    os.makedirs(destination_dir, exist_ok=True)
+    output_path = os.path.join(destination_dir, output_name)
+    canvas.save(output_path, format="JPEG", quality=quality)
+
+    return {
+        "path": output_path,
+        "name": output_name,
+        "width": canvas.width,
+        "height": canvas.height,
+        "cols": cols,
+        "rows": rows,
+        "tile_width": tile_w,
+        "tile_height": tile_h,
+    }
 
 
 def build_hogel_zip(source_dir: str, download_name: str):

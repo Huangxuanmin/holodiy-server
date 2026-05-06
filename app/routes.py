@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from typing import Optional
 
 from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
@@ -11,6 +12,7 @@ from processing import create_processor
 
 from .utils import (
     allowed_file,
+    build_composite_image,
     build_hogel_zip,
     get_image_preview,
     safe_task_subdir,
@@ -69,7 +71,12 @@ def _prepare_input_files(temp_input_dir: str):
     return None
 
 
-def _collect_generated_hogels(task_id: str, temp_output_dir: str, filename_prefix: str):
+def _collect_generated_hogels(
+    task_id: str,
+    temp_output_dir: str,
+    filename_prefix: str,
+    composite_mode: Optional[str] = None,
+):
     safe_task_id, task_output_dir = _get_task_output_dir(task_id)
     os.makedirs(task_output_dir, exist_ok=True)
 
@@ -96,8 +103,36 @@ def _collect_generated_hogels(task_id: str, temp_output_dir: str, filename_prefi
             }
         )
 
+    composite = None
+    if composite_mode and hogels:
+        try:
+            composite_name = f"{filename_prefix}_composite.jpg"
+            info = build_composite_image(
+                source_dir=temp_output_dir,
+                destination_dir=task_output_dir,
+                mode=composite_mode,
+                output_name=composite_name,
+            )
+            if info:
+                composite_preview = get_image_preview(
+                    info["path"], max_size=(1600, 1600)
+                )
+                composite_size = os.path.getsize(info["path"])
+                composite = {
+                    "name": info["name"],
+                    "size": f"{composite_size / 1024:.1f} KB",
+                    "preview_url": composite_preview,
+                    "download_url": f"/api/download/{safe_task_id}/{info['name']}",
+                    "width": info["width"],
+                    "height": info["height"],
+                    "cols": info["cols"],
+                    "rows": info["rows"],
+                }
+        except Exception as exc:
+            print(f"生成合成预览图失败: {exc}")
+
     download_all_url = f"/api/download-all/{safe_task_id}" if hogels else None
-    return hogels, download_all_url
+    return hogels, download_all_url, composite
 
 
 def _resolve_generation_task_id() -> str:
@@ -186,8 +221,8 @@ def generate_hogel():
                 return jsonify({"success": False, "error": f"处理失败: {exc}"}), 500
 
             task_id = _resolve_generation_task_id()
-            hogels, download_all_url = _collect_generated_hogels(
-                task_id, temp_output_dir, "hogel_horizontal"
+            hogels, download_all_url, composite = _collect_generated_hogels(
+                task_id, temp_output_dir, "hogel_horizontal", composite_mode="horizontal"
             )
 
             return jsonify(
@@ -196,6 +231,7 @@ def generate_hogel():
                     "message": f"成功生成 {len(hogels)} 个水平视差hogel图像",
                     "taskId": secure_filename(task_id),
                     "hogels": hogels,
+                    "composite": composite,
                     "download_all_url": download_all_url,
                     "log": "水平视差处理成功完成",
                 }
@@ -239,8 +275,8 @@ def generate_full_parallax_hogel():
                 return jsonify({"success": False, "error": f"处理失败: {exc}"}), 500
 
             task_id = _resolve_generation_task_id()
-            hogels, download_all_url = _collect_generated_hogels(
-                task_id, temp_output_dir, "hogel_full"
+            hogels, download_all_url, composite = _collect_generated_hogels(
+                task_id, temp_output_dir, "hogel_full", composite_mode="full"
             )
 
             return jsonify(
@@ -249,6 +285,7 @@ def generate_full_parallax_hogel():
                     "message": f"成功生成 {len(hogels)} 个全视差hogel图像",
                     "taskId": secure_filename(task_id),
                     "hogels": hogels,
+                    "composite": composite,
                     "download_all_url": download_all_url,
                     "log": "全视差处理成功完成",
                 }
