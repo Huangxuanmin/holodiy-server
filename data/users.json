@@ -1,0 +1,31 @@
+{
+  "c1fe305f0d3246509e2f20c1390e43a2": {
+    "id": "c1fe305f0d3246509e2f20c1390e43a2",
+    "email": null,
+    "phone": null,
+    "name": "微信用户",
+    "avatar": null,
+    "password_hash": null,
+    "oauth": [
+      {
+        "provider": "wechat",
+        "uid": "wx-1778067005760"
+      }
+    ],
+    "providers": [
+      "wechat"
+    ],
+    "created_at": 1778067007.6527271
+  },
+  "79326f8a38b246308738f586b9cd99c8": {
+    "id": "79326f8a38b246308738f586b9cd99c8",
+    "email": null,
+    "phone": "15000153393",
+    "name": "用户3393",
+    "avatar": null,
+    "password_hash": null,
+    "oauth": [],
+    "providers": [],
+    "created_at": 1778094165.678308
+  }
+}
