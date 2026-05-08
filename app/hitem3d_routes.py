@@ -203,6 +203,7 @@ def submit():
                 task_id=str(task_id),
                 thumb_url=thumb_url,
                 params=form_fields,
+                asset_type="model_3d",
             )
         return _ok(data)
     except Hitem3DError as exc:
@@ -258,34 +259,6 @@ def query():
         return _err(str(exc), status=exc.code or 1, http_code=exc.status)
     except Exception as exc:  # noqa: BLE001
         return _err(f"server error: {exc}", http_code=500)
-
-
-@hitem3d_bp.route("/tasks", methods=["GET"])
-@token_required
-def list_tasks():
-    user_id = g.current_user["id"]
-    items = task_store.list_tasks_for_user(user_id)
-    updated_any = False
-    for item in items:
-        # 1) sync non-terminal tasks from upstream
-        if not task_store.is_terminal(item.get("state", "")):
-            try:
-                payload = query_task(item["task_id"])
-            except Hitem3DError:
-                continue
-            data = payload.get("data") or {}
-            _maybe_persist_query(item["task_id"], data, user_id)
-            updated_any = True
-        # 2) re-try OSS upload for success-but-not-yet-uploaded / previously failed jobs
-        elif item.get("state") == "success" and item.get("upload_state") != "done" \
-                and item.get("model_url"):
-            _schedule_oss_upload(user_id, item["task_id"], item["model_url"])
-
-    if updated_any:
-        items = task_store.list_tasks_for_user(user_id)
-
-    items = [_shape_record(item) for item in items]
-    return _ok({"items": items})
 
 
 @hitem3d_bp.route("/tasks/<task_id>", methods=["DELETE"])

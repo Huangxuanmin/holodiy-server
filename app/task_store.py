@@ -20,6 +20,10 @@ os.makedirs(_THUMB_DIR, exist_ok=True)
 
 _TERMINAL_STATES = {"success", "failed", "cancelled", "error"}
 
+# Asset categories exposed to the frontend.
+ASSET_TYPES = ("model_3d", "parallax", "hogel")
+_DEFAULT_ASSET_TYPE = "model_3d"
+
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -30,6 +34,7 @@ def _to_dict(row: Hitem3dTask) -> Dict[str, Any]:
         "task_id": row.task_id,
         "user_id": row.user_id,
         "state": row.state,
+        "asset_type": row.asset_type or _DEFAULT_ASSET_TYPE,
         "model_url": row.model_url,
         "cover_url": row.cover_url,
         "thumb_url": row.thumb_url,
@@ -68,6 +73,7 @@ def create_task(
     task_id: str,
     thumb_url: Optional[str] = None,
     params: Optional[Dict[str, Any]] = None,
+    asset_type: str = _DEFAULT_ASSET_TYPE,
 ) -> Dict[str, Any]:
     now = time.time()
     with session_scope() as session:
@@ -75,6 +81,7 @@ def create_task(
             task_id=task_id,
             user_id=user_id,
             state="pending",
+            asset_type=asset_type or _DEFAULT_ASSET_TYPE,
             thumb_url=thumb_url,
             params=params or {},
             created_at=now,
@@ -132,13 +139,12 @@ def get_task(task_id: str) -> Optional[Dict[str, Any]]:
         return _to_dict(row) if row else None
 
 
-def list_tasks_for_user(user_id: str) -> List[Dict[str, Any]]:
+def list_tasks_for_user(user_id: str, asset_type: Optional[str] = None) -> List[Dict[str, Any]]:
     with session_scope() as session:
-        rows = session.scalars(
-            select(Hitem3dTask)
-            .where(Hitem3dTask.user_id == user_id)
-            .order_by(Hitem3dTask.created_at.desc())
-        ).all()
+        stmt = select(Hitem3dTask).where(Hitem3dTask.user_id == user_id)
+        if asset_type:
+            stmt = stmt.where(Hitem3dTask.asset_type == asset_type)
+        rows = session.scalars(stmt.order_by(Hitem3dTask.created_at.desc())).all()
         return [_to_dict(r) for r in rows]
 
 
@@ -209,6 +215,7 @@ def _migrate_json_to_sqlite() -> None:
                 task_id=tid,
                 user_id=rec.get("user_id", ""),
                 state=rec.get("state") or "pending",
+                asset_type=rec.get("asset_type") or _DEFAULT_ASSET_TYPE,
                 model_url=rec.get("model_url"),
                 cover_url=rec.get("cover_url"),
                 thumb_url=rec.get("thumb_url"),

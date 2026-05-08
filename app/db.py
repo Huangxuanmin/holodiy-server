@@ -81,6 +81,7 @@ _COLUMN_ADDITIONS = [
     ("hitem3d_tasks", "file_size", "INTEGER"),
     ("hitem3d_tasks", "upload_state", "VARCHAR(16) DEFAULT 'pending'"),
     ("hitem3d_tasks", "upload_error", "TEXT"),
+    ("hitem3d_tasks", "asset_type", "VARCHAR(32) DEFAULT 'model_3d'"),
 ]
 
 

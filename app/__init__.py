@@ -6,6 +6,7 @@ from flask import Flask
 from flask_cors import CORS
 
 from . import auth_store, config, task_store
+from .assets_routes import assets_bp
 from .auth_routes import auth_bp
 from .db import init_db
 from .hitem3d_routes import hitem3d_bp
@@ -37,5 +38,6 @@ def create_app() -> Flask:
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(hitem3d_bp)
+    app.register_blueprint(assets_bp)
 
     return app

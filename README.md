@@ -64,6 +64,8 @@ python run.py
 
 ### 接口列表
 
+#### Hogel 图像处理（`app/routes.py`）
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET  | `/api/health` | 健康检查 |
@@ -77,6 +79,43 @@ python run.py
 | POST | `/api/clear-outputs` | 清空输出目录 |
 | GET  | `/api/settings` | 获取默认参数 |
 | POST | `/api/estimate` | 预估处理性能 |
+
+#### 账号与登录（`app/auth_routes.py`，前缀 `/api/auth`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/auth/register` | 邮箱/手机号 + 密码 注册 |
+| POST | `/api/auth/login/password` | 邮箱/手机号 + 密码 登录 |
+| POST | `/api/auth/send-sms-code` | 发送手机验证码 |
+| POST | `/api/auth/login/sms` | 短信验证码登录（不存在则自动注册） |
+| POST | `/api/auth/send-email-code` | 发送邮箱验证码 |
+| POST | `/api/auth/login/email-code` | 邮箱验证码登录（不存在则自动注册） |
+| POST | `/api/auth/register/email-code` | 邮箱验证码注册（可设置初始密码） |
+| POST | `/api/auth/oauth/google` | Google 第三方登录 |
+| POST | `/api/auth/oauth/wechat` | 微信第三方登录 |
+| GET  | `/api/auth/wechat/authorize` | 获取微信扫码登录授权地址 |
+| GET  | `/api/auth/wechat/callback` | 微信授权回调（重定向回前端并带 token） |
+| GET  | `/api/auth/me` | 获取当前登录用户信息（需 token） |
+| POST | `/api/auth/logout` | 退出登录（需 token） |
+
+#### 图生 3D（`app/hitem3d_routes.py`，前缀 `/api/image-to-3d`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/image-to-3d/submit` | 提交图生 3D 任务（需 token） |
+| GET  | `/api/image-to-3d/query` | 查询任务状态（需 token） |
+| DELETE | `/api/image-to-3d/tasks/<task_id>` | 删除指定任务（需 token） |
+| GET  | `/api/image-to-3d/thumb/<name>` | 获取任务缩略图 |
+
+#### 资产库（`app/assets_routes.py`，前缀 `/api/assets`）
+
+统一的资产列表接口，覆盖 3D 模型 / 视差图 / Hogels 三类资产，均写入 `hitem3d_tasks` 表并通过 `asset_type` 字段区分。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/assets/list` | 列出当前用户资产（需 token），可选 `?type=model_3d\|parallax\|hogel` 过滤；不传则返回全部 |
+
+返回字段：`task_id`、`asset_type`、`state`、`model_url`、`cover_url`、`thumb_url`、`created_at`、`updated_at` 等；其中 3D 模型的非终态任务会同步拉取 Hitem3D 上游状态，成功后自动触发 OSS 转存并返回签名链接。
 
 完整字段与示例参见 [`docs/API.md`](docs/API.md) 与 [`docs/API_QUICK_REFERENCE.md`](docs/API_QUICK_REFERENCE.md)。
 

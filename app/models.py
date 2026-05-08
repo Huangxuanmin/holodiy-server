@@ -72,6 +72,8 @@ class Hitem3dTask(Base):
         String(64), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     state: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    # Asset category: "model_3d" | "parallax" | "hogel"
+    asset_type: Mapped[str] = mapped_column(String(32), default="model_3d", index=True)
     model_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cover_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     thumb_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
