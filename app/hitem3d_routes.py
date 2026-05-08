@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import logging
+import posixpath
+import threading
 import traceback
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+from urllib.parse import urlparse
 
-from flask import Blueprint, request
+from flask import Blueprint, g, request, send_file
 
+from . import config, oss_client, task_store
+from .auth_routes import token_required
 from .hitem3d_client import Hitem3DError, query_task, submit_task
 from .responses import err as _err, ok as _ok
 
@@ -58,7 +63,113 @@ def _collect_files(key: str) -> List[Tuple[str, bytes, str]]:
     return items
 
 
+# ---------------------------------------------------------------------------
+# OSS upload (runs in a background thread)
+# ---------------------------------------------------------------------------
+
+# Track upload threads to avoid double-scheduling for the same task.
+_upload_jobs: dict[str, threading.Thread] = {}
+_upload_jobs_lock = threading.Lock()
+
+
+def _guess_ext_from_url(url: str) -> str:
+    path = urlparse(url).path
+    ext = posixpath.splitext(path)[1]
+    return ext.lower() if ext else ".obj"
+
+
+def _background_upload(user_id: str, task_id: str, source_url: str) -> None:
+    """Stream Hitem3D ``source_url`` into OSS and flip ``upload_state`` to done."""
+    try:
+        ext = _guess_ext_from_url(source_url)
+        oss_key = oss_client.build_key(user_id, task_id, ext=ext)
+        task_store.update_upload(task_id, upload_state="uploading", oss_key=oss_key)
+
+        logger.info("[hitem3d.upload] start task=%s key=%s", task_id, oss_key)
+        size = oss_client.upload_from_url(source_url, oss_key)
+        task_store.update_upload(
+            task_id,
+            upload_state="done",
+            oss_key=oss_key,
+            file_size=size,
+            upload_error="",  # clear any previous error
+        )
+        logger.info("[hitem3d.upload] done task=%s size=%s", task_id, size)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[hitem3d.upload] failed task=%s: %s", task_id, exc)
+        task_store.update_upload(
+            task_id,
+            upload_state="failed",
+            upload_error=str(exc)[:500],
+        )
+    finally:
+        with _upload_jobs_lock:
+            _upload_jobs.pop(task_id, None)
+
+
+def _schedule_oss_upload(user_id: str, task_id: str, source_url: str) -> None:
+    if not source_url or not config.oss_configured():
+        if not config.oss_configured():
+            logger.warning("[hitem3d.upload] OSS 未配置，跳过 task=%s", task_id)
+        return
+
+    record = task_store.get_task(task_id)
+    if not record:
+        return
+    # Skip if already uploaded or currently uploading.
+    if record.get("upload_state") in {"done", "uploading"}:
+        return
+
+    with _upload_jobs_lock:
+        if task_id in _upload_jobs and _upload_jobs[task_id].is_alive():
+            return
+        thread = threading.Thread(
+            target=_background_upload,
+            args=(user_id, task_id, source_url),
+            daemon=True,
+            name=f"hitem3d-upload-{task_id[:8]}",
+        )
+        _upload_jobs[task_id] = thread
+        thread.start()
+
+
+# ---------------------------------------------------------------------------
+# response shaping
+# ---------------------------------------------------------------------------
+
+def _sign_model_url(record: dict) -> Optional[str]:
+    """Return a fresh signed OSS URL if the file is in our bucket."""
+    if record.get("upload_state") == "done" and record.get("oss_key"):
+        try:
+            return oss_client.get_signed_url(record["oss_key"])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[hitem3d] sign_url failed task=%s err=%s",
+                record.get("task_id"),
+                exc,
+            )
+    return None
+
+
+def _shape_record(record: dict) -> dict:
+    """Attach signed download URL and drop raw Hitem3D URL from the wire."""
+    shaped = dict(record)
+    signed = _sign_model_url(record)
+    if signed:
+        shaped["model_url"] = signed
+    # If OSS is configured but upload isn't done yet, don't leak the upstream
+    # (possibly already-expired) Hitem3D URL to the client.
+    elif config.oss_configured() and record.get("upload_state") != "done":
+        shaped["model_url"] = None
+    return shaped
+
+
+# ---------------------------------------------------------------------------
+# routes
+# ---------------------------------------------------------------------------
+
 @hitem3d_bp.route("/submit", methods=["POST"])
+@token_required
 def submit():
     try:
         images = _collect_files("images")
@@ -81,7 +192,19 @@ def submit():
         )
 
         payload = submit_task(form_fields, images, multi_images)
-        return _ok(payload.get("data"))
+        data = payload.get("data") or {}
+        task_id = data.get("task_id") or data.get("taskId")
+
+        if task_id:
+            first = images[0] if images else (multi_images[0] if multi_images else None)
+            thumb_url = task_store.save_thumbnail(first[1], first[2]) if first else None
+            task_store.create_task(
+                user_id=g.current_user["id"],
+                task_id=str(task_id),
+                thumb_url=thumb_url,
+                params=form_fields,
+            )
+        return _ok(data)
     except Hitem3DError as exc:
         logger.error("[hitem3d.submit] upstream error: %s (code=%s)", exc, exc.code)
         return _err(str(exc), status=exc.code or 1, http_code=exc.status)
@@ -90,7 +213,26 @@ def submit():
         return _err(f"server error: {exc}", http_code=500)
 
 
+def _maybe_persist_query(task_id: str, data: dict, user_id: str) -> None:
+    record = task_store.get_task(task_id)
+    if not record:
+        return
+    state = str(data.get("state") or "").lower() or record.get("state")
+    model_url = data.get("url") or data.get("model_url") or record.get("model_url")
+    cover_url = data.get("cover_url") or record.get("cover_url")
+    task_store.update_task(
+        task_id,
+        state=state,
+        model_url=model_url,
+        cover_url=cover_url,
+    )
+    # Kick off OSS transfer once Hitem3D marks the task successful.
+    if task_store.is_terminal(state) and state == "success" and model_url:
+        _schedule_oss_upload(user_id, task_id, model_url)
+
+
 @hitem3d_bp.route("/query", methods=["GET"])
+@token_required
 def query():
     task_id = (request.args.get("task_id") or "").strip()
     if not task_id:
@@ -98,8 +240,66 @@ def query():
 
     try:
         payload = query_task(task_id)
-        return _ok(payload.get("data"))
+        data = payload.get("data") or {}
+        _maybe_persist_query(task_id, data, g.current_user["id"])
+        # Replace upstream url with our signed OSS url if already uploaded.
+        record = task_store.get_task(task_id)
+        signed = _sign_model_url(record or {})
+        if signed:
+            data = dict(data)
+            data["url"] = signed
+            data["model_url"] = signed
+        elif config.oss_configured() and (record or {}).get("upload_state") != "done":
+            data = dict(data)
+            data["url"] = None
+            data["model_url"] = None
+        return _ok(data)
     except Hitem3DError as exc:
         return _err(str(exc), status=exc.code or 1, http_code=exc.status)
     except Exception as exc:  # noqa: BLE001
         return _err(f"server error: {exc}", http_code=500)
+
+
+@hitem3d_bp.route("/tasks", methods=["GET"])
+@token_required
+def list_tasks():
+    user_id = g.current_user["id"]
+    items = task_store.list_tasks_for_user(user_id)
+    updated_any = False
+    for item in items:
+        # 1) sync non-terminal tasks from upstream
+        if not task_store.is_terminal(item.get("state", "")):
+            try:
+                payload = query_task(item["task_id"])
+            except Hitem3DError:
+                continue
+            data = payload.get("data") or {}
+            _maybe_persist_query(item["task_id"], data, user_id)
+            updated_any = True
+        # 2) re-try OSS upload for success-but-not-yet-uploaded / previously failed jobs
+        elif item.get("state") == "success" and item.get("upload_state") != "done" \
+                and item.get("model_url"):
+            _schedule_oss_upload(user_id, item["task_id"], item["model_url"])
+
+    if updated_any:
+        items = task_store.list_tasks_for_user(user_id)
+
+    items = [_shape_record(item) for item in items]
+    return _ok({"items": items})
+
+
+@hitem3d_bp.route("/tasks/<task_id>", methods=["DELETE"])
+@token_required
+def delete_task(task_id: str):
+    ok = task_store.delete_task(task_id, g.current_user["id"])
+    if not ok:
+        return _err("任务不存在", http_code=404)
+    return _ok(msg="已删除")
+
+
+@hitem3d_bp.route("/thumb/<name>", methods=["GET"])
+def thumb(name: str):
+    path = task_store.thumb_path(name)
+    if not path:
+        return _err("not found", http_code=404)
+    return send_file(path)

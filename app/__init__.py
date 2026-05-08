@@ -5,8 +5,9 @@ import os
 from flask import Flask
 from flask_cors import CORS
 
-from . import config
+from . import auth_store, config, task_store
 from .auth_routes import auth_bp
+from .db import init_db
 from .hitem3d_routes import hitem3d_bp
 from .routes import api_bp
 
@@ -16,6 +17,11 @@ def create_app() -> Flask:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    # Initialize SQLite schema, then best-effort import legacy JSON data.
+    init_db()
+    auth_store._migrate_json_to_sqlite()
+    task_store._migrate_json_to_sqlite()
 
     app = Flask(__name__)
     CORS(app)

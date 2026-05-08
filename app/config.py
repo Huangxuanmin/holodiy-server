@@ -56,6 +56,23 @@ HITEM3D_BASE_URL = os.environ.get(
 ).strip().rstrip("/")
 
 
+# --- Aliyun OSS (generated 3D model storage) -------------------------------
+OSS_ACCESS_KEY_ID = os.environ.get("OSS_ACCESS_KEY_ID", "").strip()
+OSS_ACCESS_KEY_SECRET = os.environ.get("OSS_ACCESS_KEY_SECRET", "").strip()
+OSS_BUCKET = os.environ.get("OSS_BUCKET", "").strip()
+OSS_ENDPOINT = os.environ.get("OSS_ENDPOINT", "").strip()
+OSS_PUBLIC_BASE = os.environ.get("OSS_PUBLIC_BASE", "").strip().rstrip("/")
+OSS_KEY_PREFIX = os.environ.get("OSS_KEY_PREFIX", "hitem3d").strip().strip("/") or "hitem3d"
+try:
+    OSS_SIGN_URL_TTL = int(os.environ.get("OSS_SIGN_URL_TTL", "3600").strip() or 3600)
+except ValueError:
+    OSS_SIGN_URL_TTL = 3600
+
+
+def oss_configured() -> bool:
+    return all([OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_BUCKET, OSS_ENDPOINT])
+
+
 def hitem3d_configured() -> bool:
     return bool(HITEM3D_CLIENT_ID and HITEM3D_CLIENT_SECRET)
 
