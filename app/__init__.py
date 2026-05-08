@@ -1,4 +1,5 @@
 """Flask application factory for the Hogel API."""
+import logging
 import os
 
 from flask import Flask
@@ -6,10 +7,16 @@ from flask_cors import CORS
 
 from . import config
 from .auth_routes import auth_bp
+from .hitem3d_routes import hitem3d_bp
 from .routes import api_bp
 
 
 def create_app() -> Flask:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
     app = Flask(__name__)
     CORS(app)
 
@@ -23,5 +30,6 @@ def create_app() -> Flask:
 
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(hitem3d_bp)
 
     return app

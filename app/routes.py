@@ -5,11 +5,12 @@ import tempfile
 import uuid
 from typing import Optional
 
-from flask import Blueprint, current_app, jsonify, request, send_file
+from flask import Blueprint, current_app, request, send_file
 from werkzeug.utils import secure_filename
 
 from processing import create_processor
 
+from .responses import err as _err, ok as _ok
 from .utils import (
     allowed_file,
     build_composite_image,
@@ -40,7 +41,7 @@ def _prepare_input_files(temp_input_dir: str):
     if task_id:
         _, task_upload_dir = _get_task_upload_dir(task_id)
         if not os.path.isdir(task_upload_dir):
-            return jsonify({"success": False, "error": f"任务不存在: {task_id}"}), 400
+            return _err(f"任务不存在: {task_id}")
 
         copied_count = 0
         for filename in os.listdir(task_upload_dir):
@@ -51,22 +52,19 @@ def _prepare_input_files(temp_input_dir: str):
             copied_count += 1
 
         if copied_count == 0:
-            return (
-                jsonify({"success": False, "error": f"任务 {task_id} 下没有有效图像文件"}),
-                400,
-            )
+            return _err(f"任务 {task_id} 下没有有效图像文件")
         return None
 
     if "files" not in request.files:
-        return jsonify({"success": False, "error": "没有文件上传"}), 400
+        return _err("没有文件上传")
 
     files = request.files.getlist("files")
     if not files:
-        return jsonify({"success": False, "error": "没有选择文件"}), 400
+        return _err("没有选择文件")
 
     saved_files = save_request_files_to_dir(files, temp_input_dir)
     if not saved_files:
-        return jsonify({"success": False, "error": "没有有效的图像文件"}), 400
+        return _err("没有有效的图像文件")
 
     return None
 
@@ -147,18 +145,18 @@ def _resolve_generation_task_id() -> str:
 @api_bp.route("/health", methods=["GET"])
 def health_check():
     """健康检查端点。"""
-    return jsonify({"status": "healthy", "message": "Hogel API 服务运行正常"})
+    return _ok({"healthy": True}, msg="Hogel API 服务运行正常")
 
 
 @api_bp.route("/upload", methods=["POST"])
 def upload_files():
     """上传文件接口。"""
     if "files" not in request.files:
-        return jsonify({"success": False, "error": "没有文件上传"}), 400
+        return _err("没有文件上传")
 
     files = request.files.getlist("files")
     if not files:
-        return jsonify({"success": False, "error": "没有选择文件"}), 400
+        return _err("没有选择文件")
 
     requested_task_id = request.form.get("taskId", type=str, default="").strip()
     task_id = requested_task_id or uuid.uuid4().hex
@@ -170,7 +168,7 @@ def upload_files():
     os.makedirs(task_upload_dir, exist_ok=True)
     saved_files = save_request_files_to_dir(files, task_upload_dir)
     if not saved_files:
-        return jsonify({"success": False, "error": "没有有效的图像文件"}), 400
+        return _err("没有有效的图像文件")
 
     uploaded_files = []
     for file_path in saved_files:
@@ -183,13 +181,12 @@ def upload_files():
             }
         )
 
-    return jsonify(
+    return _ok(
         {
-            "success": True,
-            "message": f"成功上传 {len(uploaded_files)} 个文件",
             "taskId": safe_task_id,
             "files": uploaded_files,
-        }
+        },
+        msg=f"成功上传 {len(uploaded_files)} 个文件",
     )
 
 
@@ -218,27 +215,26 @@ def generate_hogel():
                     quality=quality,
                 )
             except Exception as exc:
-                return jsonify({"success": False, "error": f"处理失败: {exc}"}), 500
+                return _err(f"处理失败: {exc}", http_code=500)
 
             task_id = _resolve_generation_task_id()
             hogels, download_all_url, composite = _collect_generated_hogels(
                 task_id, temp_output_dir, "hogel_horizontal", composite_mode="horizontal"
             )
 
-            return jsonify(
+            return _ok(
                 {
-                    "success": True,
-                    "message": f"成功生成 {len(hogels)} 个水平视差hogel图像",
                     "taskId": secure_filename(task_id),
                     "hogels": hogels,
                     "composite": composite,
                     "download_all_url": download_all_url,
                     "log": "水平视差处理成功完成",
-                }
+                },
+                msg=f"成功生成 {len(hogels)} 个水平视差hogel图像",
             )
     except Exception as exc:
         print(f"生成hogel时出错: {exc}")
-        return jsonify({"success": False, "error": f"服务器内部错误: {exc}"}), 500
+        return _err(f"服务器内部错误: {exc}", http_code=500)
 
 
 @api_bp.route("/generate-full-parallax-hogel", methods=["POST"])
@@ -251,10 +247,10 @@ def generate_full_parallax_hogel():
         quality = request.form.get("quality", type=int, default=95)
 
         if canvas_width <= 0 or canvas_height <= 0 or exposure_width <= 0:
-            return jsonify({"success": False, "error": "画幅尺寸和曝光宽度必须大于0"}), 400
+            return _err("画幅尺寸和曝光宽度必须大于0")
 
         if exposure_width > canvas_width:
-            return jsonify({"success": False, "error": "曝光宽度不能大于画幅宽度"}), 400
+            return _err("曝光宽度不能大于画幅宽度")
 
         with tempfile.TemporaryDirectory() as temp_input_dir, tempfile.TemporaryDirectory() as temp_output_dir:
             prepare_error = _prepare_input_files(temp_input_dir)
@@ -272,27 +268,26 @@ def generate_full_parallax_hogel():
                     quality=quality,
                 )
             except Exception as exc:
-                return jsonify({"success": False, "error": f"处理失败: {exc}"}), 500
+                return _err(f"处理失败: {exc}", http_code=500)
 
             task_id = _resolve_generation_task_id()
             hogels, download_all_url, composite = _collect_generated_hogels(
                 task_id, temp_output_dir, "hogel_full", composite_mode="full"
             )
 
-            return jsonify(
+            return _ok(
                 {
-                    "success": True,
-                    "message": f"成功生成 {len(hogels)} 个全视差hogel图像",
                     "taskId": secure_filename(task_id),
                     "hogels": hogels,
                     "composite": composite,
                     "download_all_url": download_all_url,
                     "log": "全视差处理成功完成",
-                }
+                },
+                msg=f"成功生成 {len(hogels)} 个全视差hogel图像",
             )
     except Exception as exc:
         print(f"生成全视差hogel时出错: {exc}")
-        return jsonify({"success": False, "error": f"服务器内部错误: {exc}"}), 500
+        return _err(f"服务器内部错误: {exc}", http_code=500)
 
 
 @api_bp.route("/download/<task_id>/<filename>", methods=["GET"])
@@ -306,9 +301,9 @@ def download_task_file(task_id, filename):
         )
         if os.path.exists(file_path):
             return send_file(file_path, as_attachment=True)
-        return jsonify({"success": False, "error": "文件不存在"}), 404
+        return _err("文件不存在", http_code=404)
     except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _err(str(exc), http_code=500)
 
 
 @api_bp.route("/download/<filename>", methods=["GET"])
@@ -319,9 +314,9 @@ def download_file(filename):
         file_path = os.path.join(current_app.config["OUTPUT_FOLDER"], safe_filename)
         if os.path.exists(file_path):
             return send_file(file_path, as_attachment=True)
-        return jsonify({"success": False, "error": "文件不存在"}), 404
+        return _err("文件不存在", http_code=404)
     except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _err(str(exc), http_code=500)
 
 
 @api_bp.route("/download-all/<task_id>", methods=["GET"])
@@ -330,10 +325,10 @@ def download_all_for_task(task_id):
     try:
         safe_task_id, task_output_dir = _get_task_output_dir(task_id)
         if not safe_task_id or not os.path.isdir(task_output_dir):
-            return jsonify({"success": False, "error": f"任务不存在: {task_id}"}), 404
+            return _err(f"任务不存在: {task_id}", http_code=404)
         return build_hogel_zip(task_output_dir, f"hogel_{safe_task_id}.zip")
     except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _err(str(exc), http_code=500)
 
 
 @api_bp.route("/download-all", methods=["GET"])
@@ -344,11 +339,11 @@ def download_all():
         if task_id:
             safe_task_id, task_output_dir = _get_task_output_dir(task_id)
             if not safe_task_id or not os.path.isdir(task_output_dir):
-                return jsonify({"success": False, "error": f"任务不存在: {task_id}"}), 404
+                return _err(f"任务不存在: {task_id}", http_code=404)
             return build_hogel_zip(task_output_dir, f"hogel_{safe_task_id}.zip")
         return build_hogel_zip(current_app.config["OUTPUT_FOLDER"], "hogel_images.zip")
     except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _err(str(exc), http_code=500)
 
 
 @api_bp.route("/clear-outputs", methods=["POST"])
@@ -362,33 +357,30 @@ def clear_outputs():
                 os.remove(entry_path)
             elif os.path.isdir(entry_path):
                 shutil.rmtree(entry_path, ignore_errors=True)
-        return jsonify({"success": True, "message": "输出目录已清空"})
+        return _ok(msg="输出目录已清空")
     except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _err(str(exc), http_code=500)
 
 
 @api_bp.route("/settings", methods=["GET"])
 def get_default_settings():
     """获取默认设置。"""
-    return jsonify(
+    return _ok(
         {
-            "success": True,
-            "settings": {
-                "horizontal": {
-                    "hogelCount": 10,
-                    "hogelWidth": 500,
-                    "heightMode": "fixed",
-                    "hogelHeight": 500,
-                    "quality": 95,
-                    "enableAntiAliasing": True,
-                    "enableOptimization": True,
-                },
-                "full": {
-                    "canvasWidth": 100.0,
-                    "canvasHeight": 100.0,
-                    "exposureWidth": 10.0,
-                    "quality": 95,
-                },
+            "horizontal": {
+                "hogelCount": 10,
+                "hogelWidth": 500,
+                "heightMode": "fixed",
+                "hogelHeight": 500,
+                "quality": 95,
+                "enableAntiAliasing": True,
+                "enableOptimization": True,
+            },
+            "full": {
+                "canvasWidth": 100.0,
+                "canvasHeight": 100.0,
+                "exposureWidth": 10.0,
+                "quality": 95,
             },
         }
     )
@@ -406,15 +398,12 @@ def estimate_processing():
         memory_usage = round(total_size / (1024 * 1024) * 1.5)
         output_size = round(total_size * 0.8 / (1024 * 1024))
 
-        return jsonify(
+        return _ok(
             {
-                "success": True,
-                "estimate": {
-                    "processingTime": f"~{processing_time}s",
-                    "memoryUsage": f"~{memory_usage}MB",
-                    "outputSize": f"~{output_size}MB",
-                },
+                "processingTime": f"~{processing_time}s",
+                "memoryUsage": f"~{memory_usage}MB",
+                "outputSize": f"~{output_size}MB",
             }
         )
     except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _err(str(exc), http_code=500)

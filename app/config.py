@@ -48,6 +48,17 @@ WECHAT_FRONTEND_REDIRECT = os.environ.get(
 ).strip()
 WECHAT_SCOPE = os.environ.get("WECHAT_SCOPE", "snsapi_login").strip() or "snsapi_login"
 
+# --- Hitem3D API ----------------------------------------------------------
+HITEM3D_CLIENT_ID = os.environ.get("HITEM3D_CLIENT_ID", "").strip()
+HITEM3D_CLIENT_SECRET = os.environ.get("HITEM3D_CLIENT_SECRET", "").strip()
+HITEM3D_BASE_URL = os.environ.get(
+    "HITEM3D_BASE_URL", "https://api.hitem3d.ai"
+).strip().rstrip("/")
+
+
+def hitem3d_configured() -> bool:
+    return bool(HITEM3D_CLIENT_ID and HITEM3D_CLIENT_SECRET)
+
 
 def sms_configured() -> bool:
     return all([ALIYUN_SMS_AK_ID, ALIYUN_SMS_AK_SECRET, ALIYUN_SMS_SIGN, ALIYUN_SMS_TEMPLATE])

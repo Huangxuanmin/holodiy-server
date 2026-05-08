@@ -10,12 +10,13 @@ from functools import wraps
 from typing import Optional
 from urllib.parse import urlencode
 
-from flask import Blueprint, g, jsonify, redirect, request
+from flask import Blueprint, g, redirect, request
 
 from . import auth_store, config, rate_limit
 from .providers.email_aliyun import EmailSendError, send_email_code as _send_email_code
 from .providers.sms_aliyun import SmsSendError, send_sms_code as _send_sms_code
 from .providers.wechat import WechatAuthError, build_authorize_url, exchange_code_for_user
+from .responses import err as _err, ok as _ok
 
 log = logging.getLogger(__name__)
 
@@ -31,14 +32,6 @@ PHONE_RE = re.compile(r"^1[3-9]\d{9}$")  # 中国大陆手机号
 
 def _json() -> dict:
     return request.get_json(silent=True) or {}
-
-
-def _ok(data=None, msg: str = "ok"):
-    return jsonify({"status": 0, "msg": msg, "data": data})
-
-
-def _err(msg: str, status: int = 1, http_code: int = 400):
-    return jsonify({"status": status, "msg": msg, "data": None}), http_code
 
 
 def _auth_response(user: dict):
