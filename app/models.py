@@ -1,4 +1,12 @@
-"""SQLAlchemy ORM models."""
+"""SQLAlchemy ORM 模型定义。
+
+包含：
+- ``User``：用户主表；
+- ``OAuthLink``：第三方登录绑定（微信等）；
+- ``Token``：登录令牌；
+- ``VerifyCode``：短信/邮箱验证码；
+- ``Hitem3dTask``：Hitem3D 任务及其 OSS 转存 / 原图归档状态。
+"""
 from __future__ import annotations
 
 import time
@@ -84,5 +92,7 @@ class Hitem3dTask(Base):
     file_size: Mapped[Optional[int]] = mapped_column(default=None, nullable=True)
     upload_state: Mapped[str] = mapped_column(String(16), default="pending")
     upload_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Original uploaded source images (OSS keys). Stored as JSON list of strings.
+    source_keys: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[float] = mapped_column(Float, default=_now, index=True)
     updated_at: Mapped[float] = mapped_column(Float, default=_now)

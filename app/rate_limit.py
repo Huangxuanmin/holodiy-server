@@ -1,6 +1,7 @@
-"""Simple in-memory rate limiter for auth-sensitive endpoints.
+"""针对鉴权类敏感接口的简易内存限流。
 
-Not distributed — good enough for single-process demo. Swap to Redis for prod.
+只适用于单进程 demo / 开发环境；生产环境如需水平扩展，建议换成 Redis 等
+分布式后端。
 """
 from __future__ import annotations
 

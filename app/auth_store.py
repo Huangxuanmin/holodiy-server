@@ -1,7 +1,7 @@
-"""User / token / verification-code store backed by SQLAlchemy (SQLite by default).
+"""用户 / 令牌 / 验证码的持久化存储，底层基于 SQLAlchemy（默认 SQLite）。
 
-Public API is kept stable so ``auth_routes`` / ``hitem3d_routes`` are not
-affected by the underlying storage change.
+对外公开的函数签名保持与历史版本一致，因此 ``auth_routes`` / ``hitem3d_routes``
+等调用方无需关心底层是 JSON 文件还是数据库。
 """
 from __future__ import annotations
 

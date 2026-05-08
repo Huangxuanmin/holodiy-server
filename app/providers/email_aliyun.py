@@ -1,4 +1,8 @@
-"""阿里云邮件推送 (DirectMail) adapter."""
+"""阿里云邮件推送（DirectMail）适配器。
+
+封装验证码邮件的发送逻辑，客户端懒加载，未配置 AK/SK 时只会在真正发邮件
+时才报错，避免影响服务启动。
+"""
 from __future__ import annotations
 
 import threading

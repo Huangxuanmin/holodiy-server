@@ -1,1 +1,5 @@
-"""Provider adapters for SMS / Email sending."""
+"""第三方能力适配器包。
+
+集中封装短信、邮件、微信登录等外部 SaaS 的调用细节，路由层只依赖此处
+导出的统一接口，便于替换厂商或 mock 测试。
+"""

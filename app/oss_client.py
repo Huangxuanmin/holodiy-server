@@ -1,13 +1,14 @@
-"""Lightweight wrapper around the Aliyun OSS SDK.
+"""阿里云 OSS SDK 的轻量封装。
 
-Responsibilities:
-- Stream a remote URL (e.g. Hitem3D signed download) straight into OSS
-  without buffering the full file on disk or in memory.
-- Generate time-limited signed URLs for private-read buckets.
-- Delete objects (used when a task is removed).
+职责：
+- 把远程 URL（例如 Hitem3D 的签名下载链接）以流式方式直接转存到 OSS，
+  不在磁盘或内存里缓存整个文件；
+- 为私有读 bucket 生成带有效期的签名访问地址；
+- 上传内存字节（用于原图归档等短小对象）；
+- 删除指定对象（任务被删除时清理）。
 
-``oss2`` is imported lazily so the rest of the server still boots when OSS
-credentials are not configured.
+``oss2`` 依赖是懒加载的 —— 即使服务运行环境没有配置 OSS，也不会影响其余
+路由启动。
 """
 from __future__ import annotations
 
@@ -53,6 +54,36 @@ def build_key(user_id: str, task_id: str, ext: str = ".obj") -> str:
     return posixpath.join(config.OSS_KEY_PREFIX, user_id, f"{task_id}{safe_ext}")
 
 
+def build_source_key(user_id: str, task_id: str, index: int, ext: str = ".jpg") -> str:
+    """Object key for an original uploaded source image.
+
+    Layout: ``<source_prefix>/<user_id>/<task_id>/<index><ext>``.
+    """
+    safe_ext = ext if ext.startswith(".") else f".{ext}"
+    return posixpath.join(
+        config.OSS_SOURCE_KEY_PREFIX,
+        user_id,
+        task_id,
+        f"{index}{safe_ext}",
+    )
+
+
+def upload_bytes(
+    data: bytes,
+    object_key: str,
+    *,
+    content_type: str = "application/octet-stream",
+) -> int:
+    """Upload in-memory bytes to OSS. Returns uploaded size."""
+    bucket = _ensure_bucket()
+    headers = {"Content-Type": content_type}
+    logger.info("[oss] upload bytes: key=%s size=%d ctype=%s", object_key, len(data), content_type)
+    result = bucket.put_object(object_key, data, headers=headers)
+    if result.status // 100 != 2:
+        raise OSSError(f"OSS put_object failed: http={result.status}")
+    return len(data)
+
+
 def upload_from_url(
     source_url: str,
     object_key: str,
@@ -71,12 +102,13 @@ def upload_from_url(
     try:
         with requests.get(source_url, stream=True, timeout=timeout) as resp:
             resp.raise_for_status()
-            content_length = resp.headers.get("Content-Length")
             content_type = resp.headers.get("Content-Type") or "application/octet-stream"
 
+            # NOTE: 故意不转发上游的 Content-Length。
+            # 上游若是 gzip/chunked 传输，requests 会自动解压，
+            # iter_content 产出的字节数与响应头里的 Content-Length 不一致，
+            # OSS 会以 400 BadRequest 拒绝。交给 oss2 以流式方式自行处理长度。
             headers = {"Content-Type": content_type}
-            if content_length:
-                headers["Content-Length"] = content_length
 
             def _chunks():
                 for chunk in resp.iter_content(chunk_size=chunk_size):
@@ -84,9 +116,8 @@ def upload_from_url(
                         yield chunk
 
             logger.info(
-                "[oss] streaming upload: key=%s size=%s ctype=%s",
+                "[oss] streaming upload: key=%s ctype=%s",
                 object_key,
-                content_length or "unknown",
                 content_type,
             )
             result = bucket.put_object(object_key, _chunks(), headers=headers)
@@ -95,13 +126,13 @@ def upload_from_url(
     except requests.RequestException as exc:
         raise OSSError(f"下载源文件失败: {exc}") from exc
 
-    # Fetch authoritative size after upload (Content-Length from upstream may
-    # be missing, e.g. chunked transfer encoding).
+    # Fetch authoritative size after upload (upstream Content-Length may be
+    # missing or inaccurate, e.g. chunked transfer encoding or gzip).
     try:
         meta = bucket.head_object(object_key)
         return int(meta.content_length or 0)
     except Exception:  # noqa: BLE001
-        return int(content_length or 0)
+        return 0
 
 
 def get_signed_url(object_key: str, expires: Optional[int] = None) -> str:
@@ -123,6 +154,10 @@ def get_signed_url(object_key: str, expires: Optional[int] = None) -> str:
             parsed.query,
             parsed.fragment,
         ))
+    # Force https so the URL is usable from HTTPS front-ends (avoids mixed
+    # content blocking). Aliyun OSS supports HTTPS on every bucket endpoint.
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
     return url
 
 

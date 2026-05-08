@@ -1,6 +1,9 @@
-"""Hitem3D task store backed by SQLAlchemy (SQLite by default).
+"""Hitem3D 任务仓储，底层使用 SQLAlchemy（默认 SQLite）。
 
-Public API kept compatible with the previous JSON-based implementation.
+提供：任务的增删改查、首图缩略图的本地保存、OSS 转存状态更新、原图 OSS
+key 列表维护，以及从旧版 JSON 文件向 SQLite 的一次性幂等迁移。
+对外的函数签名保持稳定，以便调用方（``hitem3d_routes`` 等）不感知底层
+存储实现的变化。
 """
 from __future__ import annotations
 
@@ -43,6 +46,7 @@ def _to_dict(row: Hitem3dTask) -> Dict[str, Any]:
         "file_size": row.file_size,
         "upload_state": row.upload_state,
         "upload_error": row.upload_error,
+        "source_keys": list(row.source_keys or []),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -133,6 +137,24 @@ def update_upload(task_id: str, *, upload_state: Optional[str] = None,
         return _to_dict(row)
 
 
+def update_source_keys(task_id: str, source_keys: List[str],
+                       user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Replace the list of OSS source-image keys for a task.
+
+    If ``user_id`` is given, reject updates that don't match (ownership check).
+    """
+    with session_scope() as session:
+        row = session.get(Hitem3dTask, task_id)
+        if not row:
+            return None
+        if user_id is not None and row.user_id != user_id:
+            return None
+        row.source_keys = list(source_keys or [])
+        row.updated_at = time.time()
+        session.flush()
+        return _to_dict(row)
+
+
 def get_task(task_id: str) -> Optional[Dict[str, Any]]:
     with session_scope() as session:
         row = session.get(Hitem3dTask, task_id)
@@ -155,6 +177,7 @@ def delete_task(task_id: str, user_id: str) -> bool:
             return False
         thumb = row.thumb_url
         oss_key = row.oss_key
+        source_keys = list(row.source_keys or [])
         session.delete(row)
 
     # best-effort remove the stored thumbnail
@@ -172,6 +195,14 @@ def delete_task(task_id: str, user_id: str) -> bool:
         try:
             from . import oss_client
             oss_client.delete_object(oss_key)
+        except Exception:  # noqa: BLE001
+            pass
+    # best-effort remove any stored source images
+    if source_keys:
+        try:
+            from . import oss_client
+            for key in source_keys:
+                oss_client.delete_object(key)
         except Exception:  # noqa: BLE001
             pass
     return True

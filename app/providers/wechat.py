@@ -1,10 +1,10 @@
-"""WeChat Open Platform - PC 扫码登录 (snsapi_login) adapter.
+"""微信开放平台 PC 扫码登录（snsapi_login）适配器。
 
-流程：
-1. 前端跳转 `https://open.weixin.qq.com/connect/qrconnect?...` 让用户扫码；
-2. 微信重定向到我们的 `WECHAT_REDIRECT_URI?code=...&state=...`；
-3. 后端用 code 换 `access_token` + `openid`/`unionid`；
-4. 再用 access_token + openid 拉 userinfo。
+登录流程：
+1. 前端跳转到 ``https://open.weixin.qq.com/connect/qrconnect?...`` 让用户扫码；
+2. 微信将浏览器重定向回我们配置的 ``WECHAT_REDIRECT_URI?code=...&state=...``；
+3. 后端用 code 换取 ``access_token`` 与 ``openid`` / ``unionid``；
+4. 再用 ``access_token + openid`` 拉取用户公开资料（昵称、头像等）。
 """
 from __future__ import annotations
 

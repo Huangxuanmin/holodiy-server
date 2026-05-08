@@ -1,4 +1,8 @@
-"""API routes for the Hogel image processing service."""
+"""Hogel 图像处理服务的业务路由。
+
+提供视差图 / Hogel 阵列生成、上传、预览、打包下载等能力，和 Hitem3D 的
+3D 模型路由相互独立。
+"""
 import os
 import shutil
 import tempfile

@@ -1,12 +1,11 @@
-"""Unified API response helpers.
+"""统一的 API 响应封装。
 
-All JSON responses should follow the shape::
+所有 JSON 响应都遵循如下结构::
 
     {"status": <int>, "msg": <str>, "data": <any>}
 
-Where ``status == 0`` means success and any non-zero value means a business
-error. Frontend interceptors rely on this shape to surface the ``msg`` via
-toast when ``status != 0``.
+其中 ``status == 0`` 表示成功，其余值表示业务错误；前端请求拦截器会在
+``status != 0`` 时自动通过 toast 弹出 ``msg``。
 """
 from __future__ import annotations
 

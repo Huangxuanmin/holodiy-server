@@ -1,4 +1,9 @@
-"""Thin client wrapper around the Hitem3D open platform API."""
+"""Hitem3D 开放平台 API 的轻量客户端封装。
+文档地址：https://docs.hitem3d.ai/zh/api/getting-started/introduction
+
+负责把 ``/submit-task`` / ``/query-task`` 等调用所需的 AK/SK 鉴权、签名、
+multipart 组装等细节统一封装起来，路由层只需传业务参数，不用关心底层协议。
+"""
 from __future__ import annotations
 
 import base64

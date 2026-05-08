@@ -1,4 +1,9 @@
-"""Auth routes: password/SMS/email/OAuth login & registration."""
+"""鉴权相关路由。
+
+涵盖：密码登录、手机号 / 邮箱验证码登录与注册、微信 PC 扫码登录（snsapi_login）、
+当前用户信息查询、登出等。
+同时提供 ``token_required`` 装饰器，用于保护其他需要登录的路由。
+"""
 from __future__ import annotations
 
 import logging

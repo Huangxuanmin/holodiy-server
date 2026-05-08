@@ -1,4 +1,13 @@
-"""Proxy routes for the Hitem3D image-to-3D API."""
+"""Hitem3D 图生 3D 相关路由。
+
+涵盖：
+- ``POST /submit``：转发生成请求，同时压缩并把用户原图存档到 OSS；
+- ``GET /query``：透传查询并在必要时触发 OSS 转存；
+- 后台线程：把 Hitem3D 签名下载地址流式上传到我们自己的 OSS；
+- ``DELETE /tasks/<id>``：删除任务并清理 OSS 对象；
+- ``POST /tasks/<id>/sources``：历史任务补传原图入口；
+- ``GET /thumb/<name>``：本地首图缩略图访问。
+"""
 from __future__ import annotations
 
 import logging
@@ -14,6 +23,7 @@ from . import config, oss_client, task_store
 from .auth_routes import token_required
 from .hitem3d_client import Hitem3DError, query_task, submit_task
 from .responses import err as _err, ok as _ok
+from .utils import compress_image_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +161,50 @@ def _sign_model_url(record: dict) -> Optional[str]:
     return None
 
 
+def _sign_source_urls(record: dict) -> List[str]:
+    """Return fresh signed URLs for every stored source image."""
+    keys = record.get("source_keys") or []
+    if not keys or not config.oss_configured():
+        return []
+    signed: List[str] = []
+    for key in keys:
+        try:
+            signed.append(oss_client.get_signed_url(key))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[hitem3d] sign source url failed task=%s key=%s err=%s",
+                record.get("task_id"), key, exc,
+            )
+    return signed
+
+
+def _upload_sources(
+    user_id: str,
+    task_id: str,
+    images: List[Tuple[str, bytes, str]],
+) -> List[str]:
+    """Compress & upload original images to OSS. Returns list of OSS keys.
+
+    Errors are logged but do not abort the overall flow — original images are a
+    best-effort archive, not a hard requirement.
+    """
+    if not images or not config.oss_configured():
+        return []
+    keys: List[str] = []
+    for index, (_name, data, _mime) in enumerate(images):
+        try:
+            body, ctype, ext = compress_image_bytes(data)
+            key = oss_client.build_source_key(user_id, task_id, index, ext=ext)
+            oss_client.upload_bytes(body, key, content_type=ctype)
+            keys.append(key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[hitem3d.sources] upload failed task=%s index=%d err=%s",
+                task_id, index, exc,
+            )
+    return keys
+
+
 def _shape_record(record: dict) -> dict:
     """Attach signed download URL and drop raw Hitem3D URL from the wire."""
     shaped = dict(record)
@@ -161,6 +215,7 @@ def _shape_record(record: dict) -> dict:
     # (possibly already-expired) Hitem3D URL to the client.
     elif config.oss_configured() and record.get("upload_state") != "done":
         shaped["model_url"] = None
+    shaped["source_images"] = _sign_source_urls(record)
     return shaped
 
 
@@ -205,6 +260,14 @@ def submit():
                 params=form_fields,
                 asset_type="model_3d",
             )
+            # Archive the original uploads to OSS so the asset detail view can
+            # show them later. This is best-effort: failures don't abort submit.
+            all_sources = list(images) + list(multi_images)
+            source_keys = _upload_sources(
+                g.current_user["id"], str(task_id), all_sources
+            )
+            if source_keys:
+                task_store.update_source_keys(str(task_id), source_keys)
         return _ok(data)
     except Hitem3DError as exc:
         logger.error("[hitem3d.submit] upstream error: %s (code=%s)", exc, exc.code)
@@ -268,6 +331,45 @@ def delete_task(task_id: str):
     if not ok:
         return _err("任务不存在", http_code=404)
     return _ok(msg="已删除")
+
+
+@hitem3d_bp.route("/tasks/<task_id>/sources", methods=["POST"])
+@token_required
+def upload_task_sources(task_id: str):
+    """Supplement original source images for a legacy task.
+
+    Accepts multipart ``images`` (1~N files) and replaces any previously stored
+    source images for this task. Ownership is enforced by ``user_id``.
+    """
+    record = task_store.get_task(task_id)
+    if not record:
+        return _err("任务不存在", http_code=404)
+    if record.get("user_id") != g.current_user["id"]:
+        return _err("无权限", http_code=403)
+    if not config.oss_configured():
+        return _err("OSS 未配置", http_code=500)
+
+    try:
+        images = _collect_files("images")
+    except Hitem3DError as exc:
+        return _err(str(exc), http_code=exc.status or 400)
+    if not images:
+        return _err("请选择至少一张图片", http_code=400)
+
+    # Best-effort delete previous source objects so we don't leave orphans.
+    for old_key in record.get("source_keys") or []:
+        try:
+            oss_client.delete_object(old_key)
+        except Exception:  # noqa: BLE001
+            pass
+
+    keys = _upload_sources(g.current_user["id"], task_id, images)
+    if not keys:
+        return _err("上传失败", http_code=500)
+    updated = task_store.update_source_keys(task_id, keys, user_id=g.current_user["id"])
+    if not updated:
+        return _err("任务不存在", http_code=404)
+    return _ok({"source_images": _sign_source_urls(updated)})
 
 
 @hitem3d_bp.route("/thumb/<name>", methods=["GET"])

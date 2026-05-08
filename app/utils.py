@@ -1,4 +1,8 @@
-"""Helper utilities for file handling and image preview generation."""
+"""通用工具集。
+
+包含文件名校验、图片压缩（上传 OSS 前统一压缩为 JPEG）、Hogel 阵列拼图、
+zip 打包等跨模块复用的辅助函数。
+"""
 import base64
 import io
 import os
@@ -13,6 +17,45 @@ from .config import ALLOWED_EXTENSIONS
 def allowed_file(filename: str) -> bool:
     """检查文件扩展名是否允许。"""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def compress_image_bytes(
+    data: bytes,
+    *,
+    max_long_edge: int = 1600,
+    quality: int = 85,
+) -> tuple[bytes, str, str]:
+    """Re-encode an image to JPEG with a max long-edge.
+
+    Returns ``(bytes, content_type, extension)``. If Pillow can't decode the
+    input, falls back to the original bytes with ``image/octet-stream``.
+    """
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.load()
+            # Flatten alpha against white so the JPEG looks right.
+            if img.mode in ("RGBA", "LA"):
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                alpha = img.split()[-1]
+                background.paste(img.convert("RGB"), mask=alpha)
+                img = background
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+
+            longest = max(img.size)
+            if longest > max_long_edge:
+                scale = max_long_edge / float(longest)
+                new_size = (
+                    max(1, int(img.size[0] * scale)),
+                    max(1, int(img.size[1] * scale)),
+                )
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            return buf.getvalue(), "image/jpeg", ".jpg"
+    except Exception:  # noqa: BLE001
+        return data, "application/octet-stream", ".bin"
 
 
 def get_image_preview(image_path: str, max_size=(200, 200)):

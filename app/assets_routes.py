@@ -1,7 +1,11 @@
-"""Unified asset library routes.
+"""资产库统一列表路由。
 
-Exposes a single listing endpoint that returns tasks across asset categories
-(3D model / parallax / hogel). Filter via the ``type`` query parameter.
+对外只暴露一个 ``GET /api/assets/list`` 接口，支持通过 ``type`` 查询参数
+按资产类型（``model_3d`` / ``parallax`` / ``hogel``）过滤，不传则返回全部。
+
+兼职两件事：
+1. 对未结束的 3D 任务，实时向 Hitem3D 上游查询最新状态并写回本地库；
+2. 对已完成但 OSS 还未上传 / 上传失败的任务，自动补发 OSS 转存任务。
 """
 from __future__ import annotations
 

@@ -1,7 +1,8 @@
-"""SQLAlchemy engine / session setup.
+"""SQLAlchemy 引擎与会话的初始化。
 
-Uses SQLite at ``data/app.db`` by default. Override via ``DATABASE_URL``
-environment variable (e.g. ``postgresql+psycopg://...`` in production).
+默认使用 ``data/app.db`` 的 SQLite，可通过 ``DATABASE_URL`` 环境变量切换到
+PostgreSQL / MySQL。同时内置了一套极简的 ``ALTER TABLE ADD COLUMN`` 迁移，
+用于在不引入 Alembic 的前提下给 SQLite 追加新字段。
 """
 from __future__ import annotations
 
@@ -82,6 +83,7 @@ _COLUMN_ADDITIONS = [
     ("hitem3d_tasks", "upload_state", "VARCHAR(16) DEFAULT 'pending'"),
     ("hitem3d_tasks", "upload_error", "TEXT"),
     ("hitem3d_tasks", "asset_type", "VARCHAR(32) DEFAULT 'model_3d'"),
+    ("hitem3d_tasks", "source_keys", "TEXT"),
 ]
 
 

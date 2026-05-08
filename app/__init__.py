@@ -1,4 +1,10 @@
-"""Flask application factory for the Hogel API."""
+"""Flask 应用工厂。
+
+职责：
+- 初始化 Flask app、日志、数据库、上传/输出目录；
+- 注册所有蓝图（图像处理、鉴权、Hitem3D、统一资产库）；
+- 从 .env 读取配置，供各模块懒加载使用。
+"""
 import logging
 import os
 

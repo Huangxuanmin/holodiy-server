@@ -1,7 +1,7 @@
-"""阿里云短信服务 (Dysmsapi) adapter.
+"""阿里云短信服务（Dysmsapi）适配器。
 
-Lazily creates the client so missing credentials only fail when we actually
-try to send.
+封装验证码短信的发送逻辑，客户端懒加载创建——只有真正调用发送接口时才
+会检查 AK/SK，缺失凭证不会阻止服务启动。
 """
 from __future__ import annotations
 

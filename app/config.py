@@ -1,4 +1,9 @@
-"""Configuration constants for the Hogel API."""
+"""项目全局配置。
+
+在导入时读取 ``holodiy-server/.env``，把所有对外可配置的环境变量集中成模块
+级常量（上传目录、Hitem3D / OSS / 阿里云短信邮件 / 微信登录等）。
+其他模块统一从这里 ``from . import config`` 取值，避免到处 ``os.environ``。
+"""
 import os
 
 from dotenv import load_dotenv
@@ -63,6 +68,7 @@ OSS_BUCKET = os.environ.get("OSS_BUCKET", "").strip()
 OSS_ENDPOINT = os.environ.get("OSS_ENDPOINT", "").strip()
 OSS_PUBLIC_BASE = os.environ.get("OSS_PUBLIC_BASE", "").strip().rstrip("/")
 OSS_KEY_PREFIX = os.environ.get("OSS_KEY_PREFIX", "hitem3d").strip().strip("/") or "hitem3d"
+OSS_SOURCE_KEY_PREFIX = os.environ.get("OSS_SOURCE_KEY_PREFIX", "sources").strip().strip("/") or "sources"
 try:
     OSS_SIGN_URL_TTL = int(os.environ.get("OSS_SIGN_URL_TTL", "3600").strip() or 3600)
 except ValueError:
