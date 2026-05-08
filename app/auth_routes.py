@@ -3,14 +3,19 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
+import threading
+import time
 from functools import wraps
 from typing import Optional
+from urllib.parse import urlencode
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, redirect, request
 
 from . import auth_store, config, rate_limit
 from .providers.email_aliyun import EmailSendError, send_email_code as _send_email_code
 from .providers.sms_aliyun import SmsSendError, send_sms_code as _send_sms_code
+from .providers.wechat import WechatAuthError, build_authorize_url, exchange_code_for_user
 
 log = logging.getLogger(__name__)
 
@@ -197,6 +202,26 @@ def send_email_code():
     return _ok(data, msg="验证码已发送")
 
 
+@auth_bp.route("/login/email-code", methods=["POST"])
+def login_email_code():
+    """邮箱验证码登录；不存在则自动创建账号。"""
+    payload = _json()
+    email = (payload.get("email") or "").strip().lower()
+    code = (payload.get("code") or "").strip()
+
+    if not _valid_email(email):
+        return _err("邮箱格式不正确")
+    if not code:
+        return _err("请输入邮箱验证码")
+    if not auth_store.verify_code(f"email:{email}", code):
+        return _err("验证码不正确或已过期")
+
+    user = auth_store.find_user(email=email)
+    if not user:
+        user = auth_store.create_user(email=email)
+    return _auth_response(user)
+
+
 @auth_bp.route("/register/email-code", methods=["POST"])
 def register_email_code():
     """邮箱验证码注册（可设置初始密码）。"""
@@ -279,6 +304,88 @@ def oauth_wechat():
         )
 
     return _auth_response(user)
+
+
+# --- WeChat PC QR login (snsapi_login) -------------------------------------
+
+_WECHAT_STATE_TTL = 10 * 60  # 10 minutes
+_wechat_states: dict[str, float] = {}
+_wechat_states_lock = threading.Lock()
+
+
+def _wechat_issue_state() -> str:
+    state = secrets.token_urlsafe(16)
+    now = time.time()
+    with _wechat_states_lock:
+        # opportunistic GC
+        expired = [k for k, v in _wechat_states.items() if v < now]
+        for k in expired:
+            _wechat_states.pop(k, None)
+        _wechat_states[state] = now + _WECHAT_STATE_TTL
+    return state
+
+
+def _wechat_consume_state(state: str) -> bool:
+    if not state:
+        return False
+    with _wechat_states_lock:
+        expires = _wechat_states.pop(state, None)
+    return bool(expires and expires >= time.time())
+
+
+@auth_bp.route("/wechat/authorize", methods=["GET"])
+def wechat_authorize():
+    """返回微信二维码登录页 URL，由前端跳转（或 ?redirect=1 时服务端直接 302）。"""
+    if not config.wechat_configured():
+        return _err("微信登录未配置", http_code=503)
+    try:
+        state = _wechat_issue_state()
+        url = build_authorize_url(state)
+    except WechatAuthError as exc:
+        return _err(str(exc), http_code=503)
+
+    if request.args.get("redirect") in {"1", "true"}:
+        return redirect(url, code=302)
+    return _ok({"url": url, "state": state})
+
+
+@auth_bp.route("/wechat/callback", methods=["GET"])
+def wechat_callback():
+    """微信授权回调。换取用户信息 → 登录/注册 → 302 到前端并带上 token。"""
+    code = (request.args.get("code") or "").strip()
+    state = (request.args.get("state") or "").strip()
+    frontend = config.WECHAT_FRONTEND_REDIRECT or "/"
+
+    def _redirect_fail(msg: str):
+        sep = "&" if "?" in frontend else "?"
+        return redirect(f"{frontend}{sep}{urlencode({'error': msg})}", code=302)
+
+    if not code:
+        return _redirect_fail(request.args.get("error") or "wechat_no_code")
+    if not _wechat_consume_state(state):
+        return _redirect_fail("invalid_state")
+
+    try:
+        profile = exchange_code_for_user(code)
+    except WechatAuthError as exc:
+        log.warning("wechat exchange failed: %s", exc)
+        return _redirect_fail("wechat_exchange_failed")
+
+    provider_uid = profile.get("unionid") or profile.get("openid")
+    if not provider_uid:
+        return _redirect_fail("wechat_no_openid")
+
+    user = auth_store.find_user(provider="wechat", provider_uid=provider_uid)
+    if not user:
+        user = auth_store.create_user(
+            name=profile.get("nickname"),
+            avatar=profile.get("headimgurl"),
+            provider="wechat",
+            provider_uid=provider_uid,
+        )
+    token = auth_store.issue_token(user["id"])
+    sep = "&" if "?" in frontend else "?"
+    return redirect(f"{frontend}{sep}{urlencode({'token': token})}", code=302)
 
 
 @auth_bp.route("/me", methods=["GET"])

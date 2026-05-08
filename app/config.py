@@ -33,6 +33,21 @@ AUTH_PROVIDER_DEV_FALLBACK = os.environ.get(
     "AUTH_PROVIDER_DEV_FALLBACK", "false"
 ).strip().lower() in {"1", "true", "yes", "on"}
 
+# --- WeChat open platform (PC QR login, snsapi_login) ----------------------
+# 在 https://open.weixin.qq.com 创建「网站应用」后获得 AppID / AppSecret，
+# 并在"授权回调域"中登记回调域名（只填一级域名，不带协议/路径）。
+WECHAT_APP_ID = os.environ.get("WECHAT_APP_ID", "").strip()
+WECHAT_APP_SECRET = os.environ.get("WECHAT_APP_SECRET", "").strip()
+# 完整的回调 URL，必须落在已登记的"授权回调域"下。例：
+# https://yourdomain.com/api/auth/wechat/callback
+WECHAT_REDIRECT_URI = os.environ.get("WECHAT_REDIRECT_URI", "").strip()
+# 登录成功后把 token 带回到前端的哪个页面（前端路由）。
+# 例：https://yourdomain.com/auth/wechat/callback
+WECHAT_FRONTEND_REDIRECT = os.environ.get(
+    "WECHAT_FRONTEND_REDIRECT", "http://localhost:5173/auth/wechat/callback"
+).strip()
+WECHAT_SCOPE = os.environ.get("WECHAT_SCOPE", "snsapi_login").strip() or "snsapi_login"
+
 
 def sms_configured() -> bool:
     return all([ALIYUN_SMS_AK_ID, ALIYUN_SMS_AK_SECRET, ALIYUN_SMS_SIGN, ALIYUN_SMS_TEMPLATE])
@@ -40,3 +55,7 @@ def sms_configured() -> bool:
 
 def email_configured() -> bool:
     return all([ALIYUN_DM_AK_ID, ALIYUN_DM_AK_SECRET, ALIYUN_DM_ACCOUNT])
+
+
+def wechat_configured() -> bool:
+    return all([WECHAT_APP_ID, WECHAT_APP_SECRET, WECHAT_REDIRECT_URI])
